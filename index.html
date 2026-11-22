@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Heart in ASCII</title>
+<style>html,body{margin:0;height:100%;background:#000}canvas{display:block;margin:0 auto;max-width:100%;max-height:100vh}</style>
+</head>
+<body>
+<canvas id="c" width="792" height="1036"></canvas>
+<script>
+"use strict";
+// Port of heart.py (pygame) to the browser. Credit: vish.blank
+const CREDIT="vish.blank",TAU=Math.PI*2,LOOP=20;
+const T_K0=0.3,T_K1=11.4,T_LOCK=11.5,PULSE=0.9,T_SPARKLE=12.6,T_GL0=15.2,T_GL1=16.6;
+const AMP=0.9,R3=Math.sqrt(3),K_START=0.15,K_END=100,MIDDLE_Y=0.36,UNIT=160;
+const COLS=88,ROWS=74,CW=9,CH=14,W=COLS*CW,H=ROWS*CH,N=COLS*ROWS,N_STARS=220;
+const HEART=[1,.13,.24],LINE=[1,.3,.38],EDGE=[1,.6,.66],PINK=[1,.45,.62],WHITE=[1,.97,.94];
+const STARC=[[1,1,1],[1,.59,.75],[.67,.8,1],[1,.84,.59]];
+const AXIS=.36,NUMBERS=.5;
+const POOLS=["1il!;:","rtfjcvxz=+","aeoun0{}[]<>","08B$#&%Q"];
+const FILL=POOLS.map(p=>Array.from({length:12},(_,k)=>p.charCodeAt(k%p.length)));
+const SLOPE=[45,47,124,92,45];
+const MONO='Consolas,Menlo,"DejaVu Sans Mono","Courier New",monospace';
+const SERIF='"Times New Roman",Times,serif';
+const cc=s=>s.charCodeAt(0);
+const clip=(x,a,b)=>x<a?a:x>b?b:x;
+const smooth=x=>{x=clip(x,0,1);return x*x*(3-2*x)};
+const mod=(a,b)=>((a%b)+b)%b;
+const bin=a=>a<25?0:a<72?1:a<108?2:a<155?3:4;
+const kAt=t=>{const u=clip((t-T_K0)/(T_K1-T_K0),0,1);return K_START+(K_END-K_START)*u*u*u*(u*(6*u-15)+10)};
+const envelope=x=>{const b=Math.cbrt(x*x),a=AMP*Math.sqrt(Math.max(3-x*x,0));return[b-a,b+a]};
+function seeded(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rnd=seeded(14);
+const normal=()=>Math.sqrt(-2*Math.log(1-rnd()))*Math.cos(TAU*rnd());
+
+// geometry, fixed for the whole run
+const c0=COLS>>1,r0=Math.round(ROWS*37/74),ox=(c0+.5)*CW,oy=(r0+.5)*CH;
+const hash=new Int32Array(N),rand=new Float64Array(N),px=new Float64Array(N),py=new Float64Array(N);
+const light=new Float64Array(N),inside=new Uint8Array(N);
+for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+  const i=r*COLS+c;hash[i]=Math.floor(rnd()*9973);rand[i]=rnd();
+  px[i]=(c+.5)*CW;py[i]=(r+.5)*CH;
+  const gx=(px[i]-ox)/UNIT,gy=(oy-py[i])/UNIT;
+  light[i]=.32*clip((gy+1.6)/3.8,0,1)+.38*(Math.exp(-((gx+.72)**2+(gy-1.62)**2)/.30)+.6*Math.exp(-((gx-.78)**2+(gy-1.66)**2)/.40));
+  const[lo,hi]=envelope(clip(gx,-R3,R3));
+  inside[i]=Math.abs(gx)<R3&&gy>lo&&gy<hi?1:0;
+}
+
+// axes in letters
+const axC=new Int32Array(N),axL=new Float64Array(N);
+(function(){
+  for(let c=2;c<COLS-2;c++)axC[r0*COLS+c]=45;
+  axC[r0*COLS+COLS-3]=62;
+  const top=Math.trunc((oy-2.62*UNIT)/CH),bot=Math.trunc((oy+1.82*UNIT)/CH);
+  for(let r=top;r<=bot;r++)axC[r*COLS+c0]=124;
+  axC[top*COLS+c0]=94;
+  for(let i=0;i<N;i++)if(axC[i]>0)axL[i]=AXIS;
+  for(const v of[-2,-1,1,2]){const c=Math.trunc((ox+v*UNIT)/CW),s=String(v);axC[r0*COLS+c]=43;
+    for(let j=0;j<s.length;j++){const k=(r0+1)*COLS+c-s.length+1+j;axC[k]=cc(s[j]);axL[k]=NUMBERS}}
+  for(const v of[-1,1,2]){const r=Math.trunc((oy-v*UNIT)/CH),s=String(v);axC[r*COLS+c0]=43;
+    for(let j=0;j<s.length;j++){const k=r*COLS+c0-1-s.length+j;axC[k]=cc(s[j]);axL[k]=NUMBERS}}
+  axC[r0*COLS+c0]=43;
+})();
+
+// stars, sparks, sparkle spots
+const sg=Array.from({length:N_STARS},()=>Array.from({length:6},rnd));
+const skind=sg.map(g=>g[5]<.10?1:g[5]<.17?2:g[5]<.22?3:0);
+function insidePoints(n){
+  const m=n*4,x=[],y=[],o=[];
+  for(let i=0;i<m;i++)x.push((rnd()*2-1)*R3);
+  for(let i=0;i<m;i++)y.push(-1.6+3.9*rnd());
+  for(let i=0;i<m&&o.length<n;i++){const[lo,hi]=envelope(x[i]);if(y[i]>lo+.05&&y[i]<hi-.05)o.push([x[i],y[i]])}
+  return o;
+}
+const sparks=insidePoints(160).map(([x,y])=>{const a=Math.atan2(y-MIDDLE_Y,x)+normal()*.35,sp=240+340*rnd();
+  return{x:ox+x*UNIT,y:oy-y*UNIT,vx:Math.cos(a)*sp,vy:-Math.sin(a)*sp,life:1.1+.7*rnd(),hot:rnd()}});
+const spots=insidePoints(400),beats=Array.from({length:16},()=>[1.7+1.6*rnd(),rnd()]);
+
+// the letter grid of one frame
+const gch=new Int32Array(N),gcol=new Float64Array(N*3),gmov=new Uint8Array(N);
+function put(r,c,ch,rgb,mv){
+  r=Math.trunc(r);c=Math.trunc(c);if(r<0||r>=ROWS||c<0||c>=COLS)return;
+  const i=r*COLS+c;gch[i]=ch;gcol[i*3]=rgb[0];gcol[i*3+1]=rgb[1];gcol[i*3+2]=rgb[2];gmov[i]=mv?1:0;
+}
+function box3(a){
+  const o=new Float64Array(N);
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){let s=0;
+    for(let dy=-1;dy<=1;dy++){const rr=r+dy;if(rr<0||rr>=ROWS)continue;
+      for(let dx=-1;dx<=1;dx++){const x=c+dx;if(x>=0&&x<COLS)s+=a[rr*COLS+x]}}
+    o[r*COLS+c]=s}
+  return o;
+}
+function cellRays(cy,cx,reach,rgb,st){
+  for(let d=1;d<=reach;d++){
+    const fade=(1-d/(reach+1))*st,arms=[[0,1,45],[0,-1,45],[1,0,124],[-1,0,124]];
+    if(d<=(reach>>1))arms.push([1,1,92],[-1,-1,92],[1,-1,47],[-1,1,47]);
+    for(const[dy,dx,ch]of arms){
+      const yy=cy+dy*d,xx=cx+dx*d*(dy===0?2:1),k=fade*(dx&&dy?.7:1);
+      if(yy>=0&&yy<ROWS&&xx>=0&&xx<COLS){const i=yy*COLS+xx;
+        if(Math.max(gcol[i*3],gcol[i*3+1],gcol[i*3+2])<k){gch[i]=ch;gcol[i*3]=rgb[0]*k;gcol[i*3+1]=rgb[1]*k;gcol[i*3+2]=rgb[2]*k;gmov[i]=1}}}
+  }
+  if(cy>=0&&cy<ROWS&&cx>=0&&cx<COLS){const i=cy*COLS+cx;gch[i]=42;
+    gcol[i*3]=rgb[0]*1.3*st;gcol[i*3+1]=rgb[1]*1.3*st;gcol[i*3+2]=rgb[2]*1.3*st}
+}
+function stars(t){
+  const top=.78*ROWS,hot=[];
+  for(let i=0;i<N_STARS;i++){
+    const g=sg[i],x=mod(g[0]*COLS+.6*Math.sin(t*.5+g[4]*TAU),COLS),y=top*mod(g[1]-t*.006*(.5+g[3]),1);
+    const beat=2.5+4.5*g[3],peak=clip(1-Math.abs(mod(t/beat+g[2],1)-.5)*beat/.24,0,1);
+    const s=.15+.2*g[4]+peak**1.5,f=clip(.2+.8*s,0,1),b=STARC[skind[i]],r=Math.trunc(y),c=Math.trunc(x);
+    put(r,c,s>.8?42:s>.5?43:46,[b[0]*f,b[1]*f,b[2]*f],1);
+    if(s>.9)hot.push([s,r,c,skind[i]]);
+  }
+  hot.sort((a,b)=>b[0]-a[0]);
+  for(const[s,r,c,kd]of hot.slice(0,3)){const m=Math.min(s,1.2);cellRays(r,c,Math.trunc(1+3*m*m/1.2),STARC[kd],.5*m)}
+}
+const pulseFront=t=>-R3-.4+(2*R3+.8)*(t-T_LOCK)/PULSE;
+function curveCells(k,t){
+  const n=Math.trunc(3000+460*k),L=new Float64Array(N),VX=new Float64Array(N),VY=new Float64Array(N);
+  const LOW=new Float64Array(N),TURN=new Float64Array(N),HEAT=new Float64Array(N);
+  const lock=t-T_LOCK,act=lock>=0&&lock<PULSE+.4,fr=pulseFront(t);
+  const Y=x=>Math.cbrt(x*x)+AMP*Math.sin(k*x)*Math.sqrt(Math.max(3-x*x,0));
+  let x0=-R3,p0x=ox+x0*UNIT,p0y=oy-Y(x0)*UNIT;
+  for(let i=1;i<n;i++){
+    const x1=-R3+2*R3*i/(n-1),p1x=ox+x1*UNIT,p1y=oy-Y(x1)*UNIT;
+    const mx=(p0x+p1x)/2,my=(p0y+p1y)/2,xm=(x0+x1)/2,dx=p1x-p0x,dy=-(p1y-p0y),ds=Math.hypot(dx,dy)+1e-9;
+    const ix=Math.floor(mx/CW),iy=Math.floor(my/CH);
+    if(ix>=0&&ix<COLS&&iy>=0&&iy<ROWS){const j=iy*COLS+ix;
+      L[j]+=ds;VX[j]+=(dx*dx-dy*dy)/ds;VY[j]+=2*dx*dy/ds;LOW[j]+=ds*mod(my/CH,1);
+      TURN[j]+=Math.sign(dy)*(mx-(ix+.5)*CW)*ds;
+      if(act)HEAT[j]+=ds*.95*Math.exp(-(((xm-fr)/.14)**2))}
+    x0=x1;p0x=p1x;p0y=p1y;
+  }
+  return{L,VX,VY,LOW,TURN,HEAT,n};
+}
+function scene(t){
+  gch.fill(0);gcol.fill(0);gmov.fill(0);
+  const rays=[];
+  stars(t);
+  for(let i=0;i<N;i++)if(axC[i]>0){gch[i]=axC[i];gcol[i*3]=gcol[i*3+1]=gcol[i*3+2]=axL[i]}
+  const k=kAt(t),lock=t-T_LOCK,{L,VX,VY,LOW,TURN,HEAT,n}=curveCells(k,t);
+  const dens=new Float64Array(N),lit=new Float64Array(N);
+  for(let i=0;i<N;i++){dens[i]=L[i]/CH;lit[i]=dens[i]>.22?1:0}
+  const bd=box3(dens),bl=box3(lit),near=new Float64Array(N);
+  const fill=new Uint8Array(N),stroke=new Uint8Array(N),occ=new Uint8Array(N);
+  for(let i=0;i<N;i++){
+    near[i]=bd[i]/Math.max(bl[i],1);
+    const f=smooth((near[i]-.95)/.65)>rand[i]&&(lit[i]||inside[i]);
+    fill[i]=f?1:0;stroke[i]=lit[i]&&!f?1:0;occ[i]=f||stroke[i]?1:0;
+  }
+  const bo=box3(occ),B=(r,c)=>r<0||r>=ROWS||c<0||c>=COLS?0:bo[r*COLS+c];
+  const nb=(r,c)=>r<0||r>=ROWS||c<0||c>=COLS||!occ[r*COLS+c];
+  const gl=(t-T_GL0)/(T_GL1-T_GL0),tick=Math.floor(t*4);
+  let letters=0;
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const i=r*COLS+c;if(!occ[i])continue;letters++;
+    const len=Math.max(L[i],1e-9),shade=light[i]+.3*clip((near[i]-1.2)/1.5,0,1),lum=clip(.45+.55*shade/.9,.45,1);
+    const outline=fill[i]&&(nb(r-1,c)||nb(r+1,c)||nb(r,c-1)||nb(r,c+1));
+    let ch,col;
+    if(outline){
+      const gxs=B(r,c+1)-B(r,c-1),gys=B(r+1,c)-B(r-1,c),a=mod(Math.atan2(-gxs,-gys)*180/Math.PI,180);
+      ch=((a<25||a>=155)&&gys>0)?95:SLOPE[bin(a)];
+      const e=Math.max(.85,lum);col=[EDGE[0]*e,EDGE[1]*e,EDGE[2]*e];
+    }else if(fill[i]){
+      const pool=(lum>=.58)+(lum>=.72)+(lum>=.86),w=clip(lum-.75,0,1)*1.2;
+      ch=FILL[pool][(hash[i]+tick)%12];
+      col=[HEART[0]*lum+(PINK[0]-HEART[0])*w,HEART[1]*lum+(PINK[1]-HEART[1])*w,HEART[2]*lum+(PINK[2]-HEART[2])*w];
+    }else{
+      const a=mod(.5*Math.atan2(VY[i],VX[i])*180/Math.PI,180);
+      ch=SLOPE[bin(a)];
+      if((a<25||a>=155)&&LOW[i]/len>.62)ch=95;
+      if(Math.hypot(VX[i],VY[i])/len<.5)ch=TURN[i]<0?94:118;
+      const m=.88+.12*Math.min(dens[i],1);col=[LINE[0]*m,LINE[1]*m,LINE[2]*m];
+    }
+    let heat=HEAT[i]/len;
+    if(gl>0&&gl<1.2&&fill[i]){
+      const u=px[i]+.6*py[i],front=(-.15+1.3*gl)*(W+.6*H);
+      heat=Math.max(heat,.8*Math.exp(-(((u-front)/48)**2)));
+    }
+    heat=clip(heat,0,1);
+    gch[i]=ch;gmov[i]=stroke[i]&&t<T_LOCK?1:0;
+    for(let j=0;j<3;j++)gcol[i*3+j]=col[j]+(WHITE[j]-col[j])*heat;
+  }
+  // head of the pulse
+  const front=pulseFront(t);
+  if(lock>=0&&Math.abs(front)<R3*.97){
+    const fy=Math.cbrt(front*front)+AMP*Math.sin(k*front)*Math.sqrt(3-front*front),sx=ox+front*UNIT,sy=oy-fy*UNIT;
+    put(sy/CH,sx/CW,42,WHITE.map(v=>v*1.3),1);rays.push([sx,sy,12,1]);
+  }
+  // burst at k = 100
+  if(lock>=0&&lock<2){
+    const a=lock,gone=(1-Math.exp(-2.4*a))/2.4,cool=smooth(a/.5),glyph=a<.3?42:a<.8?43:46;
+    for(const p of sparks){
+      if(a>=p.life)continue;
+      const x=p.x+p.vx*gone,y=p.y+p.vy*gone+.5*420*a*a;
+      const fade=Math.pow(clip(1-a/p.life,0,1),1.2),fl=a>.65*p.life?(Math.floor(a*18+p.hot*7)%2)*.7+.3:1,m=fade*fl;
+      const tg=p.hot>.5?EDGE:PINK;
+      put(y/CH,x/CW,glyph,[0,1,2].map(j=>(WHITE[j]*1.3+(tg[j]-WHITE[j]*1.3)*cool)*m),1);
+    }
+  }
+  // sparkles on the heart
+  let sparkles=0;
+  if(t>T_SPARKLE){
+    const on=[];
+    beats.forEach(([period,off],i)=>{
+      const phase=(t-T_SPARKLE)/period+off,age=(phase%1)*period;
+      if(age>.8||(t-T_SPARKLE)<off*period)return;
+      const b=Math.sin(Math.PI*age/.8),sp=spots[(i*37+Math.floor(phase)*101)%spots.length];
+      const sx=ox+sp[0]*UNIT,sy=oy-sp[1]*UNIT;
+      put(sy/CH,sx/CW,b>.5?42:43,WHITE.map(v=>v*(.6+.7*b)),0);on.push([b,sx,sy]);sparkles++;
+    });
+    on.sort((a,b)=>b[0]-a[0]);
+    for(const[b,sx,sy]of on.slice(0,3))if(b>.55)rays.push([sx,sy,8+6*b,b]);
+  }
+  return{rays,info:{k,samples:n,letters,sparkles}};
+}
+
+// drawing
+const cv=document.getElementById("c"),ctx=cv.getContext("2d");
+const mk=(w,h)=>{const e=document.createElement("canvas");e.width=w;e.height=h;return e};
+const trail=mk(W,H),tctx=trail.getContext("2d"),q4=mk(W>>2,H>>2),q4c=q4.getContext("2d"),q8=mk(W>>3,H>>3),q8c=q8.getContext("2d");
+tctx.fillStyle="#000";tctx.fillRect(0,0,W,H);
+const rgb=(a,i)=>`rgb(${[0,1,2].map(j=>Math.round(clip(a[i+j],0,1)*255))})`;
+function drawLetters(c,moving){
+  c.font="bold 15px "+MONO;c.textAlign="center";c.textBaseline="middle";
+  for(let i=0;i<N;i++){
+    if(!gch[i]||(gmov[i]===1)!==moving)continue;
+    c.fillStyle=rgb(gcol,i*3);
+    c.fillText(String.fromCharCode(gch[i]),(i%COLS+.5)*CW,(Math.floor(i/COLS)+.5)*CH+1);
+  }
+}
+function flare(x,y,reach,st){
+  for(const[dx,dy,len]of[[1,0,1],[0,1,.8],[.7,.7,.45],[.7,-.7,.45]]){
+    const steps=Math.trunc(reach*len);
+    for(let i=1;i<steps;i++){
+      const k=(1-i/steps)*st;ctx.fillStyle=rgb(WHITE.map(v=>v*k),0);
+      for(const s of[1,-1])ctx.fillRect(Math.trunc(x+s*dx*i*3),Math.trunc(y+s*dy*i*3),2,2);
+    }
+  }
+  ctx.fillStyle=rgb(WHITE.map(v=>v*st),0);ctx.beginPath();ctx.arc(x,y,3,0,TAU);ctx.fill();
+}
+function glow(){
+  q4c.globalCompositeOperation="copy";q4c.filter="blur(2px)";q4c.drawImage(cv,0,0,W>>2,H>>2);q4c.filter="none";
+  q8c.globalCompositeOperation="copy";q8c.filter="blur(3px)";q8c.drawImage(q4,0,0,W>>3,H>>3);q8c.filter="none";
+  ctx.globalCompositeOperation="lighter";
+  ctx.globalAlpha=.75;ctx.drawImage(q4,0,0,W,H);
+  ctx.globalAlpha=.45;ctx.drawImage(q8,0,0,W,H);
+  ctx.globalAlpha=1;ctx.globalCompositeOperation="source-over";
+}
+// the equation, drawn once
+const eq=(function(){
+  const up="36px "+SERIF,it="italic 36px "+SERIF,sup="22px "+SERIF,e=mk(600,64),g=e.getContext("2d");
+  const P=[["y",it],[" = ",up],["x",it],["2/3",sup,1],[" + 0.9 sin(",up],["kx",it],[")",up],["ROOT"],["3 \u2212 ",up],["x",it],["2",sup,1]];
+  const wd=P.map(([s,f,r])=>{if(!f)return 0;g.font=f;return g.measureText(s).width+(r?2:0)});
+  const tot=wd.reduce((a,b)=>a+b,0)+28;
+  let x=(600-tot)/2+2,rx=0;const B=46;g.fillStyle=g.strokeStyle="rgb(206,108,120)";
+  P.forEach(([s,f,r],i)=>{if(!f){rx=x;x+=24;return}g.font=f;g.fillText(s,x+(r?1:0),B-(r?15:0));x+=wd[i]});
+  g.lineWidth=2;g.beginPath();g.moveTo(rx+1,B-10);g.lineTo(rx+6,B-13);g.lineTo(rx+12,B+3);g.lineTo(rx+21,B-33);g.lineTo(x+2,B-33);g.stroke();
+  return e;
+})();
+let lastT=null;
+function draw(t){
+  const{rays,info}=scene(t);
+  if(lastT===null||t<lastT){tctx.globalCompositeOperation="source-over";tctx.fillStyle="#000";tctx.fillRect(0,0,W,H)}
+  lastT=t;
+  tctx.globalCompositeOperation="source-over";tctx.fillStyle="rgba(0,0,0,.55)";tctx.fillRect(0,0,W,H);
+  tctx.globalCompositeOperation="lighten";drawLetters(tctx,true);
+  ctx.globalCompositeOperation="source-over";ctx.fillStyle="#000";ctx.fillRect(0,0,W,H);
+  ctx.drawImage(trail,0,0);
+  ctx.globalCompositeOperation="lighten";drawLetters(ctx,false);
+  for(const[x,y,reach,st]of rays)flare(x,y,reach,st);
+  ctx.globalCompositeOperation="source-over";
+  // equation and k
+  const y=Math.round(.792*H);ctx.drawImage(eq,(W-600)/2,y);
+  const hot=t>=T_LOCK?clip(1-(t-T_LOCK)/.6,0,1):0;
+  ctx.fillStyle=`rgb(${[236,120,134].map((v,j)=>Math.round(v+([255,250,245][j]-v)*hot))})`;
+  ctx.textAlign="left";ctx.textBaseline="alphabetic";
+  const txt=" = "+info.k.toFixed(2);
+  ctx.font="italic 34px "+SERIF;const w1=ctx.measureText("k").width;
+  ctx.font="34px "+SERIF;const w2=ctx.measureText(txt).width,x=(W-w1-w2)/2;
+  ctx.fillText(txt,x+w1,y+90);
+  ctx.font="italic 34px "+SERIF;ctx.fillText("k",x,y+90);
+  glow();
+  // HUD
+  ctx.font="15px "+MONO;ctx.textBaseline="top";
+  const lines=[`k ${info.k.toFixed(2).padStart(6)}    waves ${(info.k*R3/Math.PI).toFixed(1).padStart(4)}    samples ${info.samples}`,
+    `letters ${info.letters}`+(t>T_SPARKLE?`    sparkles ${info.sparkles}`:""),"Space / tap pause \u00b7 R restart"];
+  lines.forEach((s,i)=>{ctx.fillStyle="rgb(118,104,112)";ctx.fillText(s,24,H-18-21*(lines.length-i))});
+  ctx.fillStyle="rgb(190,170,182)";ctx.fillText(CREDIT,24,H-18-21*(lines.length+1)-7);
+  ctx.fillStyle="rgb(255,112,140)";ctx.textAlign="right";
+  ctx.fillText(`${Math.floor(t*2)%2===0?"\u25cf":" "} t ${t.toFixed(2).padStart(5,"0")}s`,W-24,14);
+}
+// the loop (30 fps)
+let t=0,paused=false,last=performance.now();
+draw(0);
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt=(now-last)/1000;if(dt<1/31)return;last=now;
+  if(!paused){t+=Math.min(dt,1/15);if(t>LOOP)t=0;draw(t)}
+}
+requestAnimationFrame(frame);
+addEventListener("keydown",e=>{
+  if(e.code==="Space"){paused=!paused;e.preventDefault()}
+  if(e.key==="r"||e.key==="R")t=0;
+});
+cv.addEventListener("click",()=>{paused=!paused});
+</script>
+</body>
+</html>
